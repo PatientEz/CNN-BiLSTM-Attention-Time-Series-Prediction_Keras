@@ -31,6 +31,27 @@ def attention_3d_block(inputs):
     output_attention_mul = merge([inputs, a_probs], name='attention_mul', mode='mul')
     return output_attention_mul
 
+# 注意力机制的另一种写法 适合上述报错使用 来源:https://blog.csdn.net/uhauha2929/article/details/80733255
+def attention_3d_block2(inputs, single_attention_vector=False):
+    # 如果上一层是LSTM，需要return_sequences=True
+    # inputs.shape = (batch_size, time_steps, input_dim)
+    time_steps = K.int_shape(inputs)[1]
+    input_dim = K.int_shape(inputs)[2]
+    a = Permute((2, 1))(inputs)
+    a = Dense(time_steps, activation='softmax')(a)
+    if single_attention_vector:
+        a = Lambda(lambda x: K.mean(x, axis=1))(a)
+        a = RepeatVector(input_dim)(a)
+
+    a_probs = Permute((2, 1))(a)
+    # 乘上了attention权重，但是并没有求和，好像影响不大
+    # 如果分类任务，进行Flatten展开就可以了
+    # element-wise
+    output_attention_mul = Multiply()([inputs, a_probs])
+    return output_attention_mul
+
+
+
 def create_dataset(dataset, look_back):
     '''
     对数据进行处理
@@ -90,7 +111,9 @@ def attention_model():
     x = Dropout(0.3)(x)
 
     #lstm_out = Bidirectional(LSTM(lstm_units, activation='relu'), name='bilstm')(x)
+    #对于GPU可以使用CuDNNLSTM
     lstm_out = Bidirectional(LSTM(lstm_units, return_sequences=True))(x)
+    lstm_out = Dropout(0.3)(lstm_out)
     attention_mul = attention_3d_block(lstm_out)
     attention_mul = Flatten()(attention_mul)
 
@@ -112,8 +135,8 @@ print(data.shape)
 
 
 INPUT_DIMS = 7
-TIME_STEPS = 100
-lstm_units = 140
+TIME_STEPS = 20
+lstm_units = 64
 
 #归一化
 data,normalize = NormalizeMult(data)
@@ -126,7 +149,7 @@ print(train_X.shape,train_Y.shape)
 
 m = attention_model()
 m.summary()
-m.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
-m.fit([train_X], train_Y, epochs=1, batch_size=64, validation_split=0.1)
+m.compile(optimizer='adam', loss='mse')
+m.fit([train_X], train_Y, epochs=10, batch_size=64, validation_split=0.1)
 #m.save("./model.h5")
 #np.save("normalize.npy",normalize)
